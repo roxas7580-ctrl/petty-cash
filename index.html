@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>零用金清單系統 - V5 含備註</title>
+    <style>
+        body { font-family: "Microsoft JhengHei", Arial, sans-serif; max-width: 1000px; margin: 20px auto; padding: 20px; }
+        
+        /* 頁首區域 */
+        .header-section { text-align: center; margin-bottom: 20px; }
+        .header-section h2 { margin: 5px 0; }
+        
+        /* 輸入區域樣式 (不列印) */
+        .input-group { background-color: #f0f8ff; padding: 15px; border-radius: 8px; border: 1px solid #ccc; margin-bottom: 20px; }
+        .input-row { display: flex; gap: 10px; margin-bottom: 10px; align-items: center; flex-wrap: wrap; }
+        label { font-weight: bold; }
+        input { padding: 6px; font-size: 16px; border: 1px solid #999; border-radius: 4px; }
+        #visaInput { width: 130px; }
+        #amountInput { width: 100px; }
+        #noteInput { width: 200px; } /* 備註欄較寬 */
+        
+        button { cursor: pointer; padding: 6px 12px; font-size: 16px; background-color: #007bff; color: white; border: none; border-radius: 4px; }
+        button:hover { background-color: #0056b3; }
+        button.print-btn { background-color: #28a745; margin-left: auto; margin-top: 10px; padding: 10px 20px; font-size: 18px; }
+
+        /* 列印資訊列 (日期) */
+        .info-bar { margin-bottom: 5px; font-size: 1.1em; border-bottom: 2px solid #000; padding-bottom: 5px; }
+
+        /* 雙欄佈局容器 */
+        .list-container {
+            display: flex;
+            width: 100%;
+            gap: 15px; /* 左右欄間距 */
+            align-items: flex-start; /* 頂部對齊 */
+        }
+        
+        /* 左欄與右欄表格 */
+        .table-column { flex: 1; } 
+
+        table { width: 100%; border-collapse: collapse; table-layout: fixed; /* 固定寬度算法，防止備註撐開 */ }
+        th, td { border: 1px solid #000; padding: 2px 5px; text-align: center; font-size: 13px; } /* 字體稍微調小以容納備註 */
+        th { background-color: #eee; height: 30px; }
+        
+        /* 設定固定行高，確保排版整齊，備註過長會變成... */
+        td { height: 22px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; } 
+
+        /* 刪除按鈕欄位 */
+        .action-col { width: 30px; }
+
+        /* 底部合計與簽核 */
+        .footer-section { margin-top: 10px; border-top: 2px solid #000; padding-top: 5px; }
+        .total-row { text-align: right; font-size: 1.2em; font-weight: bold; margin-bottom: 30px; padding-right: 20px; }
+        
+        .signatures { display: flex; justify-content: space-around; margin-top: 10px; }
+        .sig-box { 
+            border: 1px solid #000; 
+            width: 250px; 
+            height: 90px; 
+            position: relative; 
+        }
+        .sig-title { position: absolute; top: 5px; left: 5px; font-size: 14px; }
+
+        /* 隱藏元素 (預設) */
+        .print-only { display: none; }
+
+        /* --- 列印專用樣式 --- */
+        @media print {
+            @page { size: A4; margin: 8mm 5mm; } /* 左右邊界縮更小給備註空間 */
+            body { margin: 0; padding: 0; max-width: 100%; }
+            
+            .input-group, .print-btn, .action-col, button { display: none !important; }
+            .print-only { display: block; }
+
+            th, td { font-size: 10.5pt; } 
+            
+            .footer-section { break-inside: avoid; page-break-inside: avoid; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header-section">
+        <h2>零用金支付清單</h2>
+    </div>
+
+    <!-- 輸入區塊 -->
+    <div class="input-group">
+        <div class="input-row">
+            <label>日期設定：</label>
+            <input type="date" id="dateInput">
+        </div>
+        <hr>
+        <div class="input-row">
+            <label>簽證號：</label>
+            <input type="text" id="visaInput" placeholder="輸入後按Enter">
+            <label>金額：</label>
+            <input type="number" id="amountInput" placeholder="輸入後按Enter">
+            <label>備註：</label>
+            <input type="text" id="noteInput" placeholder="選填，按Enter新增">
+            <button onclick="addItem()">確定新增 (Enter)</button>
+        </div>
+        <div style="font-size: 0.9em; color: #666;">* 輸入流程：簽證號 [Enter] -> 金額 [Enter] -> 備註 [Enter] -> 完成新增。</div>
+        <button class="print-btn" onclick="window.print()">🖨️ 列印成紙本</button>
+    </div>
+
+    <!-- 列印時顯示的資訊列 -->
+    <div class="info-bar">
+        <span>日期：<span id="displayDate"></span></span>
+    </div>
+
+    <!-- 雙欄清單容器 -->
+    <div class="list-container">
+        
+        <!-- 左邊表格 (1-35) -->
+        <div class="table-column">
+            <table>
+                <thead>
+                    <tr>
+                        <th width="10%">項次</th>
+                        <th width="25%">簽證號</th>
+                        <th width="20%">金額</th>
+                        <th width="35%">備註</th>
+                        <th class="action-col"></th>
+                    </tr>
+                </thead>
+                <tbody id="tbodyLeft"></tbody>
+            </table>
+        </div>
+
+        <!-- 右邊表格 (36-70+) -->
+        <div class="table-column">
+            <table>
+                <thead>
+                    <tr>
+                        <th width="10%">項次</th>
+                        <th width="25%">簽證號</th>
+                        <th width="20%">金額</th>
+                        <th width="35%">備註</th>
+                        <th class="action-col"></th>
+                    </tr>
+                </thead>
+                <tbody id="tbodyRight"></tbody>
+            </table>
+        </div>
+
+    </div>
+
+    <!-- 頁尾合計與核章 -->
+    <div class="footer-section">
+        <div class="total-row">
+            總金額合計：<span id="totalAmount">0</span> 元
+        </div>
+        <div class="signatures">
+            <div class="sig-box"><span class="sig-title">主計單位核章：</span></div>
+            <div class="sig-box"><span class="sig-title">出納單位核章：</span></div>
+        </div>
+    </div>
+
+    <script>
+        let items = [];
+        let total = 0;
+        const ITEMS_PER_COLUMN = 35; // 左欄最大筆數
+
+        // 初始化日期
+        document.getElementById('dateInput').valueAsDate = new Date();
+        updateDisplayDate();
+        document.getElementById('dateInput').addEventListener('change', updateDisplayDate);
+
+        function updateDisplayDate() {
+            document.getElementById('displayDate').innerText = document.getElementById('dateInput').value;
+        }
+
+        // 鍵盤操作邏輯
+        const visaInput = document.getElementById('visaInput');
+        const amountInput = document.getElementById('amountInput');
+        const noteInput = document.getElementById('noteInput');
+
+        window.onload = function() { visaInput.focus(); };
+
+        // 1. 簽證號 Enter -> 跳到金額
+        visaInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && visaInput.value.trim() !== "") {
+                e.preventDefault();
+                amountInput.focus();
+            }
+        });
+
+        // 2. 金額 Enter -> 跳到備註
+        amountInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                noteInput.focus();
+            }
+        });
+
+        // 3. 備註 Enter -> 執行新增 -> 跳回簽證號
+        noteInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                addItem();
+            }
+        });
+
+        function addItem() {
+            const visa = visaInput.value.trim();
+            const amount = parseInt(amountInput.value);
+            const note = noteInput.value.trim();
+
+            if (!visa || isNaN(amount)) {
+                alert("請輸入完整的簽證號與金額");
+                return;
+            }
+
+            items.push({ visa: visa, amount: amount, note: note });
+            renderTables(true); // 傳入 true 表示是新增動作
+            
+            // 清空並回到起點
+            visaInput.value = "";
+            amountInput.value = "";
+            noteInput.value = "";
+            visaInput.focus();
+        }
+
+        function renderTables(isAdding = false) {
+            const tbodyLeft = document.getElementById('tbodyLeft');
+            const tbodyRight = document.getElementById('tbodyRight');
+            tbodyLeft.innerHTML = "";
+            tbodyRight.innerHTML = "";
+            
+            total = 0;
+            const limit = 70000;
+
+            const leftData = items.slice(0, ITEMS_PER_COLUMN);
+            const rightData = items.slice(ITEMS_PER_COLUMN);
+
+            leftData.forEach((item, index) => {
+                total += item.amount;
+                tbodyLeft.appendChild(createRow(index, item));
+            });
+
+            rightData.forEach((item, index) => {
+                total += item.amount;
+                tbodyRight.appendChild(createRow(index + ITEMS_PER_COLUMN, item));
+            });
+
+            // 更新總金額
+            document.getElementById('totalAmount').innerText = total.toLocaleString();
+
+            // 檢查上限警示 (視窗跳出)
+            if (total >= limit && isAdding) {
+                setTimeout(() => {
+                    alert(`⚠️ 完成！\n\n目前合計金額：${total.toLocaleString()} 元\n已達到 70,000 元以上標準。`);
+                }, 50);
+            }
+        }
+
+        function createRow(realIndex, item) {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${realIndex + 1}</td>
+                <td>${item.visa}</td>
+                <td>${item.amount.toLocaleString()}</td>
+                <td>${item.note}</td>
+                <td class="action-col"><button onclick="deleteItem(${realIndex})" style="background-color:#dc3545; color:white; border:none; border-radius:3px; cursor:pointer;">X</button></td>
+            `;
+            return tr;
+        }
+
+        function deleteItem(index) {
+            if(confirm("確定刪除項次 " + (index+1) + "？")) {
+                items.splice(index, 1);
+                renderTables(false);
+            }
+        }
+    </script>
+</body>
+</html>
